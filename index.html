@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Codespace Explorer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="manifest" href="manifest.json">
+  <style>
+    body {
+      margin: 0;
+      height: 100vh;
+      background: #1e1e1e;
+      color: #ccc;
+      font-family: "Segoe UI", sans-serif;
+      display: flex;
+    }
+    #app {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+    }
+    /* Activity Bar */
+    #activityBar {
+      width: 48px;
+      background: #333333;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 10px;
+    }
+    #activityBar .icon {
+      font-size: 20px;
+      padding: 12px 0;
+      cursor: pointer;
+      opacity: 0.7;
+    }
+    #activityBar .icon:hover {
+      opacity: 1;
+    }
+    /* Main */
+    #main {
+      display: flex;
+      flex: 1;
+    }
+    /* Sidebar (Explorer) */
+    #sidebar {
+      width: 240px;
+      background: #252526;
+      border-right: 1px solid #2a2a2a;
+      overflow-y: auto;
+    }
+    .section-title {
+      padding: 8px;
+      font-size: 12px;
+      color: #bbb;
+    }
+    #folderTree {
+      list-style: none;
+      margin: 0;
+      padding-left: 8px;
+    }
+    #folderTree li {
+      padding: 4px 10px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #folderTree li:hover {
+      background: #2a2d2e;
+    }
+    #folderTree .active {
+      background: #094771;
+      color: white;
+    }
+    /* Content */
+    #content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    #titlebar {
+      height: 32px;
+      background: #3c3c3c;
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+      border-bottom: 1px solid #2a2a2a;
+      font-size: 13px;
+    }
+    #titlebar button {
+      background: #0e639c;
+      border: none;
+      color: white;
+      padding: 4px 10px;
+      margin-right: 10px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    #titlebar button:hover {
+      background: #1177c3;
+    }
+    #currentPath {
+      opacity: 0.8;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th {
+      background: #3c3c3c;
+      padding: 6px;
+      text-align: left;
+      border-bottom: 1px solid #2a2a2a;
+      font-weight: normal;
+    }
+    td {
+      padding: 6px;
+      border-bottom: 1px solid #2a2a2a;
+    }
+    tr:hover {
+      background: #2a2d2e;
+    }
+    /* Status Bar */
+    #statusBar {
+      height: 24px;
+      background: #007acc;
+      color: white;
+      display: flex;
+      align-items: center;
+      padding-left: 10px;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div id="activityBar">
+    <div class="icon" title="Explorer">📁</div>
+    <div class="icon" title="Search">🔍</div>
+    <div class="icon" title="Settings">⚙️</div>
+  </div>
+
+  <div id="app">
+    <div id="main">
+      <div id="sidebar">
+        <div class="section-title">EXPLORER</div>
+        <ul id="folderTree"></ul>
+      </div>
+
+      <div id="content">
+        <div id="titlebar">
+          <button id="openFolder">Open Folder</button>
+          <span id="currentPath"></span>
+        </div>
+        <table id="fileTable">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Type</th>
+              <th>Size</th>
+            </tr>
+          </thead>
+          <tbody id="fileList"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="statusBar">
+      <span id="statusText">Ready</span>
+    </div>
+  </div>
+
+  <script>
+    // Service Worker registration
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("sw.js").catch(console.error);
+    }
+
+    let currentDirHandle = null;
+
+    const openBtn = document.getElementById("openFolder");
+    const currentPathSpan = document.getElementById("currentPath");
+    const fileListTbody = document.getElementById("fileList");
+    const folderTree = document.getElementById("folderTree");
+    const statusText = document.getElementById("statusText");
+
+    openBtn.addEventListener("click", async () => {
+      try {
+        const dirHandle = await window.showDirectoryPicker();
+        currentDirHandle = dirHandle;
+        currentPathSpan.textContent = dirHandle.name;
+        statusText.textContent = "Opened: " + dirHandle.name;
+        folderTree.innerHTML = "";
+        await renderDirectoryTree(dirHandle, folderTree);
+        await renderDirectoryList(dirHandle);
+      } catch (e) {
+        console.log(e);
+      }
+    });
+
+    async function renderDirectoryList(dirHandle) {
+      fileListTbody.innerHTML = "";
+      for await (const entry of dirHandle.values()) {
+        const tr = document.createElement("tr");
+        const nameTd = document.createElement("td");
+        const typeTd = document.createElement("td");
+        const sizeTd = document.createElement("td");
+
+        nameTd.textContent = entry.name;
+        typeTd.textContent = entry.kind === "directory" ? "Folder" : "File";
+
+        if (entry.kind === "file") {
+          const file = await entry.getFile();
+          sizeTd.textContent = file.size + " bytes";
+        } else {
+          sizeTd.textContent = "-";
+          tr.style.fontWeight = "bold";
+          tr.style.cursor = "pointer";
+          tr.addEventListener("dblclick", async () => {
+            currentDirHandle = entry;
+            currentPathSpan.textContent = entry.name;
+            await renderDirectoryList(entry);
+          });
+        }
+
+        tr.appendChild(nameTd);
+        tr.appendChild(typeTd);
+        tr.appendChild(sizeTd);
+        fileListTbody.appendChild(tr);
+      }
+    }
+
+    async function renderDirectoryTree(dirHandle, parentUl) {
+      parentUl.innerHTML = "";
+      const rootLi = document.createElement("li");
+      rootLi.textContent = dirHandle.name;
+      rootLi.classList.add("active");
+      parentUl.appendChild(rootLi);
+
+      rootLi.addEventListener("click", async () => {
+        currentDirHandle = dirHandle;
+        currentPathSpan.textContent = dirHandle.name;
+        await renderDirectoryList(dirHandle);
+      });
+
+      // Optional: you could expand subdirectories here if you want
+    }
+  </script>
+</body>
+</html>
