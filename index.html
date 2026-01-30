@@ -2,9 +2,9 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>Codespace Explorer</title>
+  <title>Codespace Explorer IDE</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="manifest" href="manifest.json">
+
   <style>
     body {
       margin: 0;
@@ -14,12 +14,15 @@
       font-family: "Segoe UI", sans-serif;
       display: flex;
     }
+
+    /* 全体レイアウト */
     #app {
       display: flex;
-      flex-direction: column;
       width: 100%;
+      height: 100vh;
     }
-    /* Activity Bar */
+
+    /* Activity Bar（左端） */
     #activityBar {
       width: 48px;
       background: #333333;
@@ -37,12 +40,8 @@
     #activityBar .icon:hover {
       opacity: 1;
     }
-    /* Main */
-    #main {
-      display: flex;
-      flex: 1;
-    }
-    /* Sidebar (Explorer) */
+
+    /* Explorer（ファイル構造） */
     #sidebar {
       width: 240px;
       background: #252526;
@@ -67,16 +66,14 @@
     #folderTree li:hover {
       background: #2a2d2e;
     }
-    #folderTree .active {
-      background: #094771;
-      color: white;
-    }
-    /* Content */
-    #content {
+
+    /* Editor（Monaco） */
+    #editor {
       flex: 1;
-      display: flex;
-      flex-direction: column;
+      height: 100%;
     }
+
+    /* Title Bar */
     #titlebar {
       height: 32px;
       background: #3c3c3c;
@@ -98,152 +95,119 @@
     #titlebar button:hover {
       background: #1177c3;
     }
-    #currentPath {
-      opacity: 0.8;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-    }
-    th {
-      background: #3c3c3c;
-      padding: 6px;
-      text-align: left;
-      border-bottom: 1px solid #2a2a2a;
-      font-weight: normal;
-    }
-    td {
-      padding: 6px;
-      border-bottom: 1px solid #2a2a2a;
-    }
-    tr:hover {
-      background: #2a2d2e;
-    }
-    /* Status Bar */
-    #statusBar {
-      height: 24px;
-      background: #007acc;
-      color: white;
+
+    /* Editor コンテナ */
+    #editorContainer {
+      flex: 1;
       display: flex;
-      align-items: center;
-      padding-left: 10px;
-      font-size: 12px;
+      flex-direction: column;
     }
   </style>
+
+  <!-- Monaco Editor CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>
 </head>
+
 <body>
-  <div id="activityBar">
-    <div class="icon" title="Explorer">📁</div>
-    <div class="icon" title="Search">🔍</div>
-    <div class="icon" title="Settings">⚙️</div>
-  </div>
-
   <div id="app">
-    <div id="main">
-      <div id="sidebar">
-        <div class="section-title">EXPLORER</div>
-        <ul id="folderTree"></ul>
-      </div>
 
-      <div id="content">
-        <div id="titlebar">
-          <button id="openFolder">Open Folder</button>
-          <span id="currentPath"></span>
-        </div>
-        <table id="fileTable">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Type</th>
-              <th>Size</th>
-            </tr>
-          </thead>
-          <tbody id="fileList"></tbody>
-        </table>
-      </div>
+    <!-- Activity Bar -->
+    <div id="activityBar">
+      <div class="icon">📁</div>
+      <div class="icon">🔍</div>
+      <div class="icon">⚙️</div>
     </div>
 
-    <div id="statusBar">
-      <span id="statusText">Ready</span>
+    <!-- Explorer + Editor -->
+    <div id="sidebar">
+      <div class="section-title">EXPLORER</div>
+      <button id="openFolder" style="margin: 8px;">フォルダを開く</button>
+      <ul id="folderTree"></ul>
     </div>
+
+    <div id="editorContainer">
+      <div id="titlebar">
+        <span id="currentFile">No file</span>
+      </div>
+      <div id="editor"></div>
+    </div>
+
   </div>
 
   <script>
-    // Service Worker registration
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("sw.js").catch(console.error);
-    }
+    let editor;
+    let currentFileHandle = null;
 
-    let currentDirHandle = null;
-
-    const openBtn = document.getElementById("openFolder");
-    const currentPathSpan = document.getElementById("currentPath");
-    const fileListTbody = document.getElementById("fileList");
-    const folderTree = document.getElementById("folderTree");
-    const statusText = document.getElementById("statusText");
-
-    openBtn.addEventListener("click", async () => {
-      try {
-        const dirHandle = await window.showDirectoryPicker();
-        currentDirHandle = dirHandle;
-        currentPathSpan.textContent = dirHandle.name;
-        statusText.textContent = "Opened: " + dirHandle.name;
-        folderTree.innerHTML = "";
-        await renderDirectoryTree(dirHandle, folderTree);
-        await renderDirectoryList(dirHandle);
-      } catch (e) {
-        console.log(e);
+    /* Monaco Editor 初期化 */
+    require.config({
+      paths: {
+        'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.34.1/min/vs'
       }
     });
 
-    async function renderDirectoryList(dirHandle) {
-      fileListTbody.innerHTML = "";
+    require(['vs/editor/editor.main'], function () {
+      editor = monaco.editor.create(document.getElementById('editor'), {
+        value: "",
+        language: "plaintext",
+        theme: "vs-dark"
+      });
+    });
+
+    /* フォルダを開く */
+    document.getElementById("openFolder").addEventListener("click", async () => {
+      const dirHandle = await window.showDirectoryPicker();
+      const tree = document.getElementById("folderTree");
+      tree.innerHTML = "";
+      await renderDirectoryTree(dirHandle, tree);
+    });
+
+    /* フォルダツリー生成 */
+    async function renderDirectoryTree(dirHandle, parentUl) {
       for await (const entry of dirHandle.values()) {
-        const tr = document.createElement("tr");
-        const nameTd = document.createElement("td");
-        const typeTd = document.createElement("td");
-        const sizeTd = document.createElement("td");
+        const li = document.createElement("li");
+        li.textContent = entry.name;
 
-        nameTd.textContent = entry.name;
-        typeTd.textContent = entry.kind === "directory" ? "Folder" : "File";
+        if (entry.kind === "directory") {
+          const subUl = document.createElement("ul");
+          li.appendChild(subUl);
 
-        if (entry.kind === "file") {
-          const file = await entry.getFile();
-          sizeTd.textContent = file.size + " bytes";
-        } else {
-          sizeTd.textContent = "-";
-          tr.style.fontWeight = "bold";
-          tr.style.cursor = "pointer";
-          tr.addEventListener("dblclick", async () => {
-            currentDirHandle = entry;
-            currentPathSpan.textContent = entry.name;
-            await renderDirectoryList(entry);
+          li.addEventListener("click", async () => {
+            subUl.innerHTML = "";
+            await renderDirectoryTree(entry, subUl);
+          });
+
+        } else if (entry.kind === "file") {
+          li.addEventListener("click", async () => {
+            await openFile(entry);
           });
         }
 
-        tr.appendChild(nameTd);
-        tr.appendChild(typeTd);
-        tr.appendChild(sizeTd);
-        fileListTbody.appendChild(tr);
+        parentUl.appendChild(li);
       }
     }
 
-    async function renderDirectoryTree(dirHandle, parentUl) {
-      parentUl.innerHTML = "";
-      const rootLi = document.createElement("li");
-      rootLi.textContent = dirHandle.name;
-      rootLi.classList.add("active");
-      parentUl.appendChild(rootLi);
-
-      rootLi.addEventListener("click", async () => {
-        currentDirHandle = dirHandle;
-        currentPathSpan.textContent = dirHandle.name;
-        await renderDirectoryList(dirHandle);
-      });
-
-      // Optional: you could expand subdirectories here if you want
+    /* ファイルを開く */
+    async function openFile(fileHandle) {
+      currentFileHandle = fileHandle;
+      const file = await fileHandle.getFile();
+      const text = await file.text();
+      editor.setValue(text);
+      document.getElementById("currentFile").textContent = fileHandle.name;
     }
+
+    /* Ctrl+S で保存 */
+    document.addEventListener("keydown", async (e) => {
+      if (e.ctrlKey && e.key === "s") {
+        e.preventDefault();
+        if (!currentFileHandle) return;
+
+        const writable = await currentFileHandle.createWritable();
+        await writable.write(editor.getValue());
+        await writable.close();
+        alert("保存しました: " + currentFileHandle.name);
+      }
+    });
   </script>
+
 </body>
 </html>
