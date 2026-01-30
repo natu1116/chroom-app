@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>Codespace Explorer IDE</title>
+  <title>Codespace IDE</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <style>
@@ -15,14 +15,13 @@
       display: flex;
     }
 
-    /* 全体レイアウト */
     #app {
       display: flex;
       width: 100%;
       height: 100vh;
     }
 
-    /* Activity Bar（左端） */
+    /* Activity Bar */
     #activityBar {
       width: 48px;
       background: #333333;
@@ -41,7 +40,7 @@
       opacity: 1;
     }
 
-    /* Explorer（ファイル構造） */
+    /* Explorer */
     #sidebar {
       width: 240px;
       background: #252526;
@@ -67,13 +66,12 @@
       background: #2a2d2e;
     }
 
-    /* Editor（Monaco） */
-    #editor {
+    /* Editor */
+    #editorContainer {
       flex: 1;
-      height: 100%;
+      display: flex;
+      flex-direction: column;
     }
-
-    /* Title Bar */
     #titlebar {
       height: 32px;
       background: #3c3c3c;
@@ -83,28 +81,12 @@
       border-bottom: 1px solid #2a2a2a;
       font-size: 13px;
     }
-    #titlebar button {
-      background: #0e639c;
-      border: none;
-      color: white;
-      padding: 4px 10px;
-      margin-right: 10px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-    #titlebar button:hover {
-      background: #1177c3;
-    }
-
-    /* Editor コンテナ */
-    #editorContainer {
+    #editor {
       flex: 1;
-      display: flex;
-      flex-direction: column;
     }
   </style>
 
-  <!-- Monaco Editor CDN -->
+  <!-- Monaco Editor -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>
 </head>
 
@@ -118,13 +100,14 @@
       <div class="icon">⚙️</div>
     </div>
 
-    <!-- Explorer + Editor -->
+    <!-- Explorer -->
     <div id="sidebar">
       <div class="section-title">EXPLORER</div>
       <button id="openFolder" style="margin: 8px;">フォルダを開く</button>
       <ul id="folderTree"></ul>
     </div>
 
+    <!-- Editor -->
     <div id="editorContainer">
       <div id="titlebar">
         <span id="currentFile">No file</span>
@@ -158,26 +141,50 @@
       const dirHandle = await window.showDirectoryPicker();
       const tree = document.getElementById("folderTree");
       tree.innerHTML = "";
-      await renderDirectoryTree(dirHandle, tree);
+
+      const rootLi = document.createElement("li");
+      rootLi.textContent = dirHandle.name;
+      tree.appendChild(rootLi);
+
+      const rootUl = document.createElement("ul");
+      rootUl.style.display = "block";
+      rootLi.appendChild(rootUl);
+
+      await renderDirectoryTree(dirHandle, rootUl);
     });
 
-    /* フォルダツリー生成 */
+    /* フォルダツリー（開閉対応） */
     async function renderDirectoryTree(dirHandle, parentUl) {
       for await (const entry of dirHandle.values()) {
         const li = document.createElement("li");
         li.textContent = entry.name;
 
         if (entry.kind === "directory") {
+          li.classList.add("folder");
+
+          let expanded = false;
           const subUl = document.createElement("ul");
+          subUl.style.display = "none";
           li.appendChild(subUl);
 
-          li.addEventListener("click", async () => {
-            subUl.innerHTML = "";
-            await renderDirectoryTree(entry, subUl);
+          li.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            expanded = !expanded;
+
+            if (expanded) {
+              subUl.innerHTML = "";
+              subUl.style.display = "block";
+              await renderDirectoryTree(entry, subUl);
+            } else {
+              subUl.innerHTML = "";
+              subUl.style.display = "none";
+            }
           });
 
         } else if (entry.kind === "file") {
-          li.addEventListener("click", async () => {
+          li.classList.add("file");
+          li.addEventListener("click", async (e) => {
+            e.stopPropagation();
             await openFile(entry);
           });
         }
@@ -186,16 +193,46 @@
       }
     }
 
-    /* ファイルを開く */
+    /* ファイルを開く（画像対応） */
     async function openFile(fileHandle) {
       currentFileHandle = fileHandle;
       const file = await fileHandle.getFile();
+      const name = fileHandle.name;
+      document.getElementById("currentFile").textContent = name;
+
+      const ext = name.split(".").pop().toLowerCase();
+
+      // 画像ファイル
+      if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) {
+        const url = URL.createObjectURL(file);
+
+        editorContainer.innerHTML = `
+          <div id="titlebar"><span id="currentFile">${name}</span></div>
+          <div style="flex:1; display:flex; justify-content:center; align-items:center; background:#1e1e1e;">
+            <img src="${url}" style="max-width:90%; max-height:90%; border:1px solid #444;">
+          </div>
+        `;
+        return;
+      }
+
+      // テキストファイル
       const text = await file.text();
-      editor.setValue(text);
-      document.getElementById("currentFile").textContent = fileHandle.name;
+
+      editorContainer.innerHTML = `
+        <div id="titlebar"><span id="currentFile">${name}</span></div>
+        <div id="editor" style="flex:1;"></div>
+      `;
+
+      require(['vs/editor/editor.main'], function () {
+        editor = monaco.editor.create(document.getElementById('editor'), {
+          value: text,
+          language: "plaintext",
+          theme: "vs-dark"
+        });
+      });
     }
 
-    /* Ctrl+S で保存 */
+    /* Ctrl+S 保存 */
     document.addEventListener("keydown", async (e) => {
       if (e.ctrlKey && e.key === "s") {
         e.preventDefault();
